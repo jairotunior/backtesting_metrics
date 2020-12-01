@@ -22,15 +22,16 @@ utc_timezone = pytz.timezone('UTC')
 
 # Read trades
 df_trades = pd.read_csv("input/trades.csv", sep=";")
-df_trades['Date Entry'] = pd.to_datetime(df_trades['Date Entry'])
-df_trades['Date Exit'] = pd.to_datetime(df_trades['Date Exit'])
+df_trades['Date Entry'] = pd.to_datetime(df_trades['Date Entry'], format="%d/%m/%Y %H:%M")
+df_trades['Date Exit'] = pd.to_datetime(df_trades['Date Exit'], format="%d/%m/%Y %H:%M")
 
-ranges = pd.date_range(start="2017/12/10", end="2020/1/1", freq="T").tz_localize(tz='UTC')
+ranges = pd.date_range(start="2017/12/10", end="2020/1/1", freq="T")
 
 df_balance = pd.DataFrame({"date": ranges})
 df_balance = df_balance.set_index("date")
+df_balance.index = df_balance.index.tz_localize(None).tz_localize(tz=utc_timezone)
 
-print(df_trades.dtypes)
+print(df_balance.head)
 
 for index, trade in df_trades.iterrows():
     symbol = trade['Symbol']
@@ -43,7 +44,7 @@ for index, trade in df_trades.iterrows():
     pip_value = trade['Risk[USD]'] / stoploss_pips
 
     #print(trade['Date Entry'].tz_localize(tz=server_timezone), price_entry)
-    print("Entry: ", trade['Date Entry'], " ** Price Exit: ", trade['Date Exit'])
+    #print("Entry: ", trade['Date Entry'], " ** Price Exit: ", trade['Date Exit'])
 
     #from_date = server_timezone.localize(datetime.strptime(trade['Date Entry'], "%d/%m/%Y %H:%M"))
     #to_date = server_timezone.localize(datetime.strptime(trade['Date Exit'], "%d/%m/%Y %H:%M"))
@@ -51,26 +52,34 @@ for index, trade in df_trades.iterrows():
     to_date = trade['Date Exit'].tz_localize(tz=server_timezone)
     #price_entry = trade['']
 
+    print(index, " ** Entry: ", from_date, " ** Price Exit: ", to_date)
+
     year = from_date.year
 
     if year == 2017:
         year = 2018
 
+    # Agrega la columna del trade
+    df_balance[index] = np.nan
+
     # Open file with candlestick data
     df_instrument = pd.read_csv("ohlc_data/{}/{}.csv".format(year, symbol), sep=";")
-    df_instrument['date'] = pd.to_datetime(df_instrument['date'])
+    df_instrument['date'] = pd.to_datetime(df_instrument['date'], format="%Y-%m-%d %H:%M")
     df_instrument = df_instrument.set_index('date')
 
     df_instrument.index = df_instrument.index.tz_localize(None).tz_localize(tz='UTC')
 
-    mask = (df_instrument.index > from_date) & (df_instrument.index <= to_date)
 
-    df_candles = df_instrument.loc[mask]
-    #df_candles = df_candles.set_index('date')
+    mask_candles = (df_instrument.index > from_date) & (df_instrument.index <= to_date)
 
-    df_bal = df_balance.loc[mask]
+    df_candles = df_instrument.loc[from_date:to_date]
 
-    df_balance[index] = np.nan
+    print(df_candles.head())
+    print(df_candles.tail())
+
+    mask_balance = (df_balance.index > from_date) & (df_balance.index <= to_date)
+
+    df_bal = df_balance.loc[from_date:to_date]
 
     last_close = price_entry
 
@@ -83,17 +92,20 @@ for index, trade in df_trades.iterrows():
         elif side == 'Short':
             gain = (price_entry - last_close) / tick_size / 10 * pip_value
 
-        print(gain, last_close, price_entry, tick_size, pip_value)
+        #print(gain, last_close, price_entry, tick_size, pip_value)
 
         df_balance.loc[i, index] = gain
 
     df_balance[index] = df_balance[index].ffill()
-
-    df_balance.to_csv("output/backtesting.csv")
-
-    print(df_balance.tail(10))
+    df_balance[index] = df_balance[index].replace(to_replace=np.nan, value=0)
 
     break
+
+df_balance['initial'] = 100000
+df_balance['pnl'] = df_balance.sum(axis=1)
+
+df_balance.to_csv("output/backtesting.csv")
+
 
 
 
